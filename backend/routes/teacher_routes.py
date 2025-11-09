@@ -1,13 +1,13 @@
 import os
 from flask import Blueprint, jsonify, request, current_app
 from werkzeug.utils import secure_filename
-from datetime import datetime
+from datetime import datetime  # <-- Already imported, just confirming
 from sqlalchemy import func
 
 from utils.db import db
 from models.attendance import Attendance
-from models.user import User  # <-- Import User model
-from models.class_model import Class # <-- Import Class model
+from models.user import User
+from models.class_model import Class
 from utils.auth_middleware import requires_auth, requires_role
 
 teacher_bp = Blueprint('teacher_bp', __name__)
@@ -19,14 +19,14 @@ def allowed_file(filename):
     return '.' in filename and \
            filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-# --- ROUTE 1: FILE UPLOAD (The one you were missing) ---
+# --- ROUTE 1: FILE UPLOAD (Modified) ---
 @teacher_bp.route('/upload_class_photo', methods=['POST'])
 @requires_auth
 @requires_role('teacher')
 def upload_class_photo():
     """
     Handles the file upload for a teacher's class photo.
-    Saves the file to the UPLOAD_FOLDER.
+    Saves the file to the UPLOAD_FOLDER with a unique timestamped name.
     """
     if 'class_photo' not in request.files:
         return jsonify({"error": "No file part in request"}), 400
@@ -37,20 +37,29 @@ def upload_class_photo():
         return jsonify({"error": "No file selected"}), 400
 
     if file and allowed_file(file.filename):
-        filename = secure_filename(file.filename)
+        
+        # --- MODIFICATION START ---
+        # Get the original filename to extract the extension
+        original_filename = file.filename
+        
+        # Use os.path.splitext to reliably get the extension (e.g., '.jpg')
+        _ , file_extension = os.path.splitext(original_filename)
+        
+        # Generate a unique timestamp (YYYYMMDD_HHMMSS_microseconds)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        
+        # Create the new, unique filename
+        # We run this final string through secure_filename as a last safety check
+        filename = secure_filename(f"{timestamp}{file_extension}")
+        # --- MODIFICATION END ---
+        
         upload_folder = current_app.config['UPLOAD_FOLDER']
         save_path = os.path.join(upload_folder, filename)
         
         try:
             file.save(save_path)
-            # You would likely want to link this photo to a class here
-            # For example:
-            # class_id = request.form.get('class_id')
-            # class_obj = Class.query.get(class_id)
-            # if class_obj:
-            #    class_obj.image_path = f"/uploads/class_images/{filename}"
-            #    db.session.commit()
-
+            
+            # The JSON response now includes the new unique filename
             return jsonify({
                 "message": "File uploaded successfully", 
                 "filename": filename,
@@ -62,7 +71,7 @@ def upload_class_photo():
     else:
         return jsonify({"error": "File type not allowed"}), 400
 
-# --- ROUTE 2: MARK ATTENDANCE (Completely rewritten) ---
+# --- ROUTE 2: MARK ATTENDANCE (No changes) ---
 @teacher_bp.route('/mark-attendance', methods=['POST'])
 @requires_auth
 @requires_role('teacher')
@@ -98,14 +107,12 @@ def mark_attendance():
     present_set = set(present_student_ids)
 
     # 3. Calculate absent students (Server-side logic)
-    # This is more reliable!
     absent_set = all_student_ids - present_set
     
     # 4. Check if a record already exists for this class on this date
-    # This prevents duplicate records if you scan twice
     existing_record = Attendance.query.filter(
         Attendance.class_id == class_id,
-        func.date(Attendance.date) == target_date # Use func.date for safety
+        func.date(Attendance.date) == target_date
     ).first()
 
     if existing_record:
@@ -121,7 +128,7 @@ def mark_attendance():
         # 5b. CREATE new record
         new_record = Attendance(
             class_id=class_id,
-            date=target_date,  # Explicitly set the date!
+            date=target_date,
             present_students=list(present_set),
             absent_students=list(absent_set),
             image_path=image_path
@@ -131,7 +138,7 @@ def mark_attendance():
         db.session.commit()
         return jsonify(new_record.to_json()), 201
 
-# --- ROUTE 3: GET REPORTS (This was already fine) ---
+# --- ROUTE 3: GET REPORTS (No changes) ---
 @teacher_bp.route('/class/<int:class_id>/reports', methods=['GET'])
 @requires_auth
 @requires_role('teacher')
@@ -140,6 +147,6 @@ def get_class_reports(class_id):
     records = Attendance.query.filter_by(class_id=class_id).order_by(Attendance.date.desc()).limit(30).all()
     
     if not records:
-        return jsonify([]), 200 # Return empty list, not 404
+        return jsonify([]), 200
         
     return jsonify([record.to_json() for record in records]), 200
